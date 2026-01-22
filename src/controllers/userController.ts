@@ -11,7 +11,7 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
 
     const [users, total] = await Promise.all([
       User.find()
-        .select("-password") // Exclude password
+        .select("-password")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -37,7 +37,6 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
     });
   }
 };
-
 // 2. Update User Role (ADMIN only)
 export const updateUserRole = async (req: AuthRequest, res: Response) => {
   try {

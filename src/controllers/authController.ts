@@ -1,12 +1,12 @@
 import { Request, Response } from "express";
 import User from "../models/User";
-import Invite from "../models/Invite"; // নতুন ইম্পোর্ট
+import Invite from "../models/Invite";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import {
   generateInviteToken,
   generateInviteLink,
-} from "../utils/tokenGenerator"; // নতুন ইম্পোর্ট
+} from "../utils/tokenGenerator";
 
 // Helper: Generate JWT Token
 const generateAuthToken = (userId: string, role: string): string => {

@@ -1,10 +1,15 @@
 import { Request, Response } from "express";
 import User from "../models/User";
+import Invite from "../models/Invite"; // নতুন ইম্পোর্ট
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import {
+  generateInviteToken,
+  generateInviteLink,
+} from "../utils/tokenGenerator"; // নতুন ইম্পোর্ট
 
-// Simple token generator inside controller
-const generateToken = (userId: string, role: string): string => {
+// Helper: Generate JWT Token
+const generateAuthToken = (userId: string, role: string): string => {
   const secret = process.env.JWT_SECRET || "default_dev_secret";
   return jwt.sign({ userId, role }, secret, { expiresIn: "7d" });
 };
@@ -30,8 +35,7 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    // ✅ Use the simple generator
-    const token = generateToken(user._id.toString(), user.role);
+    const token = generateAuthToken(user._id.toString(), user.role);
 
     res.json({
       message: "Login successful",
@@ -50,41 +54,169 @@ export const login = async (req: Request, res: Response) => {
   }
 };
 
-// 2. Admin Invite User
+// 2. Admin Invite User - UPDATED VERSION
 export const inviteUser = async (req: Request, res: Response) => {
   try {
     const { email, role } = req.body;
-    if (!email) return res.status(400).json({ message: "Email required" });
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: "User already exists" });
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
     }
 
-    const tempPassword = "Temp@123";
-    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+    // 1. Check if user already registered
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "User already registered" });
+    }
 
-    const user = new User({
+    // 2. Check if invite already exists and not expired
+    const existingInvite = await Invite.findOne({ email });
+    if (existingInvite && existingInvite.expiresAt > new Date()) {
+      return res
+        .status(400)
+        .json({ message: "Active invite already exists for this email" });
+    }
+
+    // 3. Generate invite token and expiry (24 hours)
+    const token = generateInviteToken();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24);
+
+    // 4. Delete old expired invites if any
+    if (existingInvite) {
+      await Invite.deleteOne({ email });
+    }
+
+    // 5. Save new invite
+    const invite = new Invite({
       email,
       role: role || "STAFF",
+      token,
+      expiresAt,
+    });
+
+    await invite.save();
+
+    // 6. Generate invite link (for simulation)
+    const inviteLink = generateInviteLink(token);
+
+    res.json({
+      message: "Invite sent successfully",
+      invite: {
+        email,
+        role: invite.role,
+        token,
+        expiresAt,
+        inviteLink,
+      },
+      note: "In production, send this link via email to the user",
+    });
+  } catch (error) {
+    console.error("Invite error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// 3. Register via Invite Token - NEW ENDPOINT
+export const registerViaInvite = async (req: Request, res: Response) => {
+  try {
+    const { token, name, password } = req.body;
+
+    if (!token || !name || !password) {
+      return res.status(400).json({
+        message: "Token, name and password are required",
+      });
+    }
+
+    // 1. Find valid invite
+    const invite = await Invite.findOne({
+      token,
+      expiresAt: { $gt: new Date() }, // Not expired
+      acceptedAt: null, // Not already accepted
+    });
+
+    if (!invite) {
+      return res.status(400).json({
+        message: "Invalid or expired invite token",
+      });
+    }
+
+    // 2. Check if user already exists
+    const existingUser = await User.findOne({ email: invite.email });
+    if (existingUser) {
+      return res.status(400).json({ message: "User already registered" });
+    }
+
+    // 3. Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 4. Create user
+    const user = new User({
+      name,
+      email: invite.email,
       password: hashedPassword,
-      name: email.split("@")[0],
+      role: invite.role,
       invitedAt: new Date(),
     });
 
     await user.save();
 
+    // 5. Mark invite as accepted
+    invite.acceptedAt = new Date();
+    await invite.save();
+
+    // 6. Generate auth token
+    const authToken = generateAuthToken(user._id.toString(), user.role);
+
     res.json({
-      message: "User invited successfully",
+      message: "Registration successful",
+      token: authToken,
       user: {
+        id: user._id,
+        name: user.name,
         email: user.email,
         role: user.role,
-        invitedAt: user.invitedAt,
-        tempPassword: tempPassword, // For testing only
+        status: user.status,
       },
     });
   } catch (error) {
-    console.error("Invite error:", error);
+    console.error("Register error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// 4. Validate Invite Token - NEW ENDPOINT
+export const validateInviteToken = async (req: Request, res: Response) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({ message: "Token is required" });
+    }
+
+    const invite = await Invite.findOne({
+      token: token as string,
+      expiresAt: { $gt: new Date() },
+      acceptedAt: null,
+    });
+
+    if (!invite) {
+      return res.status(400).json({
+        valid: false,
+        message: "Invalid or expired token",
+      });
+    }
+
+    res.json({
+      valid: true,
+      invite: {
+        email: invite.email,
+        role: invite.role,
+        expiresAt: invite.expiresAt,
+      },
+    });
+  } catch (error) {
+    console.error("Validate token error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };

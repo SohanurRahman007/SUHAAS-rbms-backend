@@ -46,9 +46,9 @@ app.get("/", (req, res) => {
 });
 
 // Start Server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(
-    `📝 JWT Secret loaded: ${process.env.JWT_SECRET ? "✅ Yes" : "❌ No"}`,
-  );
-});
+// app.listen(PORT, () => {
+//   console.log(`🚀 Server running on http://localhost:${PORT}`);
+//   console.log(
+//     `📝 JWT Secret loaded: ${process.env.JWT_SECRET ? "✅ Yes" : "❌ No"}`,
+//   );
+// });
